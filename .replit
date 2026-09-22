@@ -1,0 +1,8 @@
+entrypoint = "main.go"
+run = "go run ."
+
+[deployment]
+run = ["sh", "-c", "go run ."]
+
+[env]
+GO111MODULE = "on"

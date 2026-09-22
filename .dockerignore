@@ -1,0 +1,15 @@
+.env
+.env.*
+.git
+.gitignore
+.replit
+.replit.user
+.cache
+.config
+bin
+logs
+tmp
+*.log
+*.test
+coverage.out
+README.md
