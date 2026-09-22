@@ -29,9 +29,6 @@ RUN apk --no-cache add ca-certificates tzdata
 # Copy binary from builder
 COPY --from=builder /app/bin/server .
 
-# Copy additional files if needed
-COPY --from=builder /app/docs ./docs
-
 # Create non-root user
 RUN adduser -D -g '' appuser
 
