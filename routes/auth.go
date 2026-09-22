@@ -9,7 +9,7 @@ import (
 
 func Auth(router *gin.Engine) {
 	controller := authcontroller.New(authservice.New(env.GetConfig()))
-	group := router.Group("/api/v1/auth")
+	group := router.Group("/auth")
 	group.POST("/signup", controller.Signup)
 	group.POST("/login", controller.Login)
 }

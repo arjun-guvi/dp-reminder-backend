@@ -11,7 +11,7 @@ import (
 
 func Payments(router *gin.Engine) {
 	controller := paymentscontroller.New(paymentservice.New(env.GetConfig()))
-	group := router.Group("/api/v1/payments")
+	group := router.Group("/payments")
 	group.Use(configauth.Auth(types.RouterArr{}))
 	group.POST("", controller.Create)
 	group.GET("", controller.List)
