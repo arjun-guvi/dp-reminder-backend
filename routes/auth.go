@@ -12,4 +12,5 @@ func Auth(router *gin.Engine) {
 	group := router.Group("/auth")
 	group.POST("/signup", controller.Signup)
 	group.POST("/login", controller.Login)
+	group.POST("/logout", controller.Logout)
 }

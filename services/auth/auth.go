@@ -13,6 +13,7 @@ import (
 
 	"github.com/ares/dp-vc-webApp/configs/env"
 	"github.com/ares/dp-vc-webApp/configs/mongo"
+	"github.com/ares/dp-vc-webApp/configs/redis"
 	"github.com/ares/dp-vc-webApp/configs/types"
 	"github.com/ares/dp-vc-webApp/models/user"
 	"go.mongodb.org/mongo-driver/bson"
@@ -95,6 +96,52 @@ func (s *Service) ValidateToken(token string) (*types.User, error) {
 		return nil, errors.New("invalid or expired token")
 	}
 	return &types.User{ID: claims.Subject, Email: claims.Email, Permissions: []string{"payments.view", "payments.manage"}, Metadata: map[string]interface{}{}}, nil
+}
+
+func (s *Service) Logout(ctx context.Context, token string) error {
+	// Validate the token first
+	user, err := s.ValidateToken(token)
+	if err != nil {
+		return err
+	}
+
+	// Calculate token TTL based on expiration
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return errors.New("invalid token")
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return errors.New("invalid token")
+	}
+
+	var claims tokenClaims
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return errors.New("invalid token")
+	}
+
+	// Calculate remaining time until expiration
+	expiresAt := time.Unix(claims.Expires, 0)
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		// Token already expired, nothing to blacklist
+		return nil
+	}
+
+	// Add token to blacklist in Redis
+	blacklistKey := fmt.Sprintf("blacklist:%s", user.ID)
+	err = redis.Set(ctx, blacklistKey+":"+token, "1", ttl)
+	if err != nil {
+		return fmt.Errorf("failed to blacklist token: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Service) IsTokenBlacklisted(ctx context.Context, userID, token string) (bool, error) {
+	blacklistKey := fmt.Sprintf("blacklist:%s", userID)
+	return redis.Exists(ctx, blacklistKey+":"+token)
 }
 
 func (s *Service) issueToken(account user.User) (string, error) {

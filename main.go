@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,7 +22,8 @@ import (
 )
 
 var (
-	isWorker = flag.Bool("worker", false, "Run as background worker")
+	isWorker             = flag.Bool("worker", false, "Run as background worker")
+	runNotificationsOnce = flag.Bool("notifications-once", false, "Check and send payment notifications once")
 )
 
 func main() {
@@ -67,14 +69,23 @@ func main() {
 	}
 	defer redis.Close()
 
-	// Worker mode
+	// One-time notification check mode
+	if *runNotificationsOnce {
+		if err := worker.RunNotificationsOnce(context.Background()); err != nil {
+			fmt.Printf("Notification scan failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Worker-only mode
 	if *isWorker {
 		runWorker()
 		return
 	}
 
-	// HTTP server mode
-	runHTTPServer(port)
+	// Default: Run both HTTP server and worker (for Docker/production)
+	runHTTPServerWithWorker(port)
 }
 
 func runWorker() {
@@ -84,21 +95,15 @@ func runWorker() {
 
 	// Start worker with graceful shutdown
 	worker.Start(ctx)
-
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	fmt.Println("Shutting down worker...")
-	cancel()
-
-	// Give worker time to finish current jobs
-	time.Sleep(5 * time.Second)
-	fmt.Println("Worker stopped")
 }
 
-func runHTTPServer(port string) {
+func runHTTPServerWithWorker(port string) {
+	fmt.Println("Starting combined server and worker mode...")
+
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Set Gin mode based on environment
 	if env.GetConfig().AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -126,11 +131,19 @@ func runHTTPServer(port string) {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Start server in goroutine
+	// Start worker in a goroutine
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		worker.Start(ctx)
+	}()
+
+	// Start server in goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		fmt.Printf("Server starting on http://0.0.0.0:%s\n", port)
-		httpAddr := "0.0.0.0:" + port
-		fmt.Printf("Server starting on http://%s\n", httpAddr)
 		fmt.Printf("Health check: http://localhost:%s/health\n", port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("Server error: %v\n", err)
@@ -143,17 +156,23 @@ func runHTTPServer(port string) {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	fmt.Println("\nShutting down server...")
+	fmt.Println("\nShutting down server and worker...")
 
-	// Graceful shutdown with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	// Cancel context to stop worker
+	cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	// Graceful shutdown HTTP server with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		fmt.Printf("Server forced to shutdown: %v\n", err)
 	}
 
-	fmt.Println("Server stopped")
+	// Wait for worker and server to finish
+	wg.Wait()
+
+	fmt.Println("Server and worker stopped")
 }
 
 // CORSMiddleware handles CORS for all requests

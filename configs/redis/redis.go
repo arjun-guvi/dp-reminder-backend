@@ -18,6 +18,7 @@ var (
 func Init(config *env.Config) (*redis.Client, error) {
 	client = redis.NewClient(&redis.Options{
 		Addr:     config.RedisURI,
+		Username: config.RedisUser,
 		Password: config.RedisPassword,
 		DB:       0,
 	})
@@ -31,6 +32,26 @@ func Init(config *env.Config) (*redis.Client, error) {
 	}
 
 	return client, nil
+}
+
+// AcquireLock obtains a short-lived distributed lock for scheduled jobs.
+func AcquireLock(ctx context.Context, key string, expiration time.Duration) (bool, error) {
+	if client == nil {
+		return false, fmt.Errorf("Redis client is not initialized")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return client.SetNX(ctx, buildKey("lock:"+key), "1", expiration).Result()
+}
+
+// ReleaseLock releases a distributed lock.
+func ReleaseLock(ctx context.Context, key string) error {
+	if client == nil {
+		return fmt.Errorf("Redis client is not initialized")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return client.Del(ctx, buildKey("lock:"+key)).Err()
 }
 
 // Close closes the Redis connection

@@ -20,18 +20,23 @@ type Config struct {
 	// Redis
 	RedisURI      string
 	RedisPassword string
+	RedisUser     string
 	RedisPrefix   string
 
 	// Payment notifications
-	PaymentReminderDays int
-	SMTPHost            string
-	SMTPPort            int
-	SMTPUsername        string
-	SMTPPassword        string
-	SMTPFrom            string
-	TelegramBotToken    string
-	AuthSecret          string
-	AuthTokenHours      int
+	PaymentReminderDays         int
+	SMTPHost                    string
+	SMTPPort                    int
+	SMTPUsername                string
+	SMTPPassword                string
+	SMTPFrom                    string
+	TelegramBotToken            string
+	NotificationIntervalMinutes int
+	GmailUsername               string
+	GmailAppPassword            string
+	GmailFrom                   string
+	AuthSecret                  string
+	AuthTokenHours              int
 
 	// OpenTelemetry
 	OTLPEndpoint string
@@ -47,24 +52,29 @@ func Load() error {
 
 	// Initialize config
 	config = &Config{
-		Port:                getEnv("PORT", "8080"),
-		AppEnv:              getEnv("APP_ENV", "development"),
-		MongoURI:            getEnv("MONGO_URI", "mongodb://localhost:27017"),
-		MongoDBName:         getEnv("MONGO_DB_NAME", "dp-vc-webApp"),
-		RedisURI:            getEnv("REDIS_URI", "localhost:6379"),
-		RedisPassword:       getEnv("REDIS_PASSWORD", ""),
-		RedisPrefix:         getEnv("REDIS_PREFIX", "dp-vc-webApp"),
-		PaymentReminderDays: GetEnvInt("PAYMENT_REMINDER_DAYS", 1),
-		SMTPHost:            getEnv("SMTP_HOST", ""),
-		SMTPPort:            GetEnvInt("SMTP_PORT", 587),
-		SMTPUsername:        getEnv("SMTP_USERNAME", ""),
-		SMTPPassword:        getEnv("SMTP_PASSWORD", ""),
-		SMTPFrom:            getEnv("SMTP_FROM", ""),
-		TelegramBotToken:    getEnv("TELEGRAM_BOT_TOKEN", ""),
-		AuthSecret:          getEnv("AUTH_SECRET", "change-this-secret-in-production"),
-		AuthTokenHours:      GetEnvInt("AUTH_TOKEN_HOURS", 24),
-		OTLPEndpoint:        getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
-		ServiceName:         getEnv("OTEL_SERVICE_NAME", "dp-vc-webApp"),
+		Port:                        getEnv("PORT", "8080"),
+		AppEnv:                      getEnv("APP_ENV", "development"),
+		MongoURI:                    getEnv("MONGO_URI", "mongodb://localhost:27017"),
+		MongoDBName:                 getEnv("MONGO_DB_NAME", "dp-vc-webApp"),
+		RedisURI:                    getEnv("REDIS_URI", "localhost:6379"),
+		RedisPassword:               getEnv("REDIS_PASSWORD", ""),
+		RedisUser:                   getEnv("REDIS_USER", ""),
+		RedisPrefix:                 getEnv("REDIS_PREFIX", "dp-vc-webApp"),
+		PaymentReminderDays:         GetEnvInt("PAYMENT_REMINDER_DAYS", 1),
+		SMTPHost:                    getEnv("SMTP_HOST", ""),
+		SMTPPort:                    GetEnvInt("SMTP_PORT", 587),
+		SMTPUsername:                getEnv("SMTP_USERNAME", ""),
+		SMTPPassword:                getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:                    getEnv("SMTP_FROM", ""),
+		TelegramBotToken:            getEnv("TELEGRAM_BOT_TOKEN", ""),
+		NotificationIntervalMinutes: GetEnvInt("NOTIFICATION_INTERVAL_MINUTES", 30),
+		GmailUsername:               getEnv("GMAIL_USERNAME", ""),
+		GmailAppPassword:            getEnv("GMAIL_APP_PASSWORD", ""),
+		GmailFrom:                   getEnv("GMAIL_FROM", ""),
+		AuthSecret:                  getEnv("AUTH_SECRET", "change-this-secret-in-production"),
+		AuthTokenHours:              GetEnvInt("AUTH_TOKEN_HOURS", 24),
+		OTLPEndpoint:                getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+		ServiceName:                 getEnv("OTEL_SERVICE_NAME", "dp-vc-webApp"),
 	}
 
 	return nil

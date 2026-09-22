@@ -10,6 +10,7 @@ func Register(router *gin.Engine) {
 	Health(router)
 	Auth(router)
 	Payments(router)
+	Notification(router)
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(404, gin.H{
 			"status": "error",

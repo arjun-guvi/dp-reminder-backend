@@ -30,3 +30,7 @@ type AuthResponse struct {
 	Token string `json:"token"`
 	User  User   `json:"user"`
 }
+
+type LogoutRequest struct {
+	Token string `json:"token"`
+}

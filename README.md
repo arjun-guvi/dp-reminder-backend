@@ -89,6 +89,7 @@ dp-vc-webApp/
 
    REDIS_URI=localhost:6379
    REDIS_PASSWORD=
+   REDIS_USER=
    REDIS_PREFIX=dp-vc-webApp
 
    OTEL_EXPORTER_OTLP_ENDPOINT=
@@ -109,6 +110,24 @@ make run
 
 # In another terminal, test the endpoint
 curl http://localhost:8080/health
+```
+
+`docker-compose.yml` starts three application services: `api`, `worker`, and the local infrastructure. The worker runs continuously with:
+
+```bash
+./server --worker
+```
+
+It scans for payment notifications every 30 minutes by default. Start everything with:
+
+```bash
+docker compose up -d --build
+```
+
+View worker logs with:
+
+```bash
+docker compose logs -f worker
 ```
 
 ## Deploying on Replit
@@ -190,13 +209,41 @@ Expected response:
 }
 ```
 
-## Payment API
+## Payment Notifications
 
-The worker checks pending payments within `PAYMENT_REMINDER_DAYS` and sends one notification through each configured channel. Run it separately with `go run main.go --worker`.
+Run the worker separately with `go run main.go --worker`. By default, it scans the `payments` collection every 30 minutes. It sends reminders for pending payments due within `PAYMENT_REMINDER_DAYS`, including overdue pending payments, using a Redis lock so only one worker sends a reminder when multiple worker instances are running. MongoDB remains the source of payment records; Redis is only used for the distributed scheduler lock.
+
+For a system cron job that starts and exits after one scan, use:
+
+```cron
+*/30 * * * * cd /path/to/backend && /usr/local/go/bin/go run . --notifications-once >> logs/notifications.log 2>&1
+```
+
+For production, build the binary once and use the binary in cron instead of `go run`:
+
+```bash
+go build -o bin/server .
+```
+
+```cron
+*/30 * * * * cd /path/to/backend && ./bin/server --notifications-once >> logs/notifications.log 2>&1
+```
+
+For Gmail, create a Gmail App Password and configure:
+
+```env
+GMAIL_USERNAME=your-gmail@gmail.com
+GMAIL_APP_PASSWORD=your-16-character-app-password
+GMAIL_FROM=your-gmail@gmail.com
+```
+
+The server sends through `smtp.gmail.com:587`. Never use your normal Gmail password and never expose these values to the frontend.
+
+For Telegram, create a bot with BotFather, set `TELEGRAM_BOT_TOKEN`, and add each recipient's chat ID to the payment request. Each recipient must start or interact with the bot before the bot can message them.
 
 ## Authentication API
 
-Create an account with `POST /api/v1/auth/signup` or sign in with `POST /api/v1/auth/login`. Both return a bearer token. Send it with every payment request:
+Create an account with `POST /auth/signup` or sign in with `POST /auth/login`. Both return a bearer token. Send it with every payment request:
 
 ```http
 Authorization: Bearer <token>
@@ -218,11 +265,11 @@ Login body:
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| `POST` | `/api/v1/payments` | Create a pending payment |
-| `GET` | `/api/v1/payments?status=pending` | List payments |
-| `GET` | `/api/v1/payments/:id` | Get one payment |
-| `PATCH` | `/api/v1/payments/:id/status` | Mark `pending`, `paid`, or `cancelled` |
-| `DELETE` | `/api/v1/payments/:id` | Delete a payment |
+| `POST` | `/payments` | Create a pending payment |
+| `GET` | `/payments?status=pending` | List payments |
+| `GET` | `/payments/:id` | Get one payment |
+| `PATCH` | `/payments/:id/status` | Mark `pending`, `paid`, or `cancelled` |
+| `DELETE` | `/payments/:id` | Delete a payment |
 
 Example create body:
 
@@ -234,15 +281,15 @@ Example create body:
    "currency": "USD",
    "due_date": "2026-10-01T09:00:00Z",
    "recipient_name": "Finance team",
-   "recipient_email": "finance@example.com",
-   "telegram_chat_id": "",
+   "recipient_emails": ["finance@example.com", "owner@example.com"],
+   "telegram_chat_ids": ["123456789", "987654321"],
    "notification_channels": ["email"]
 }
 ```
 
 ### Frontend integration prompt
 
-> Build a payment-tracking screen connected to `http://localhost:8080/api/v1/payments`. Provide a form for title, description, amount, three-letter currency, UTC due date/time, recipient name, recipient email, optional Telegram chat ID, and notification channels (`email` and/or `telegram`). Submit with `POST /api/v1/payments`; list records with `GET /api/v1/payments?status=pending`; show due date, amount, recipient, channels, and status; allow marking a record paid or cancelled with `PATCH /api/v1/payments/:id/status` and deleting it with `DELETE /api/v1/payments/:id`. Use the API envelope `{ status, data, error }`, show validation/server errors, display dates in the user’s local timezone, and refresh the list after every mutation. Do not put SMTP or Telegram secrets in the browser; those remain backend environment variables.
+> Build a payment-tracking screen connected to `http://localhost:8080`. Authenticate with `POST /auth/signup` or `POST /auth/login`, save the returned bearer token securely, and send it as `Authorization: Bearer <token>` for payment requests. Provide a form for title, description, amount, three-letter currency, UTC due date/time, recipient name, multiple recipient emails, multiple Telegram chat IDs, and notification channels (`email` and/or `telegram`). Submit with `POST /payments`; list records with `GET /payments?status=pending`; show due date, amount, recipients, channels, and status; allow marking a record paid or cancelled with `PATCH /payments/:id/status` and deleting it with `DELETE /payments/:id`. Use the API envelope `{ status, data, error }`, show validation/server errors, display dates in the user’s local timezone, and refresh the list after every mutation. Do not put Gmail, SMTP, Redis, MongoDB, or Telegram secrets in the browser; those remain server-side environment variables.
 
 ## Adding New Features
 

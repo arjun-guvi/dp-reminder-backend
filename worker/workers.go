@@ -9,13 +9,19 @@ import (
 	"time"
 
 	"github.com/ares/dp-vc-webApp/configs/env"
+	"github.com/ares/dp-vc-webApp/configs/logger"
+	appredis "github.com/ares/dp-vc-webApp/configs/redis"
 	paymentservice "github.com/ares/dp-vc-webApp/services/payments"
 	"github.com/ares/dp-vc-webApp/worker/jobs"
 )
 
+var log = logger.Worker()
+
 const (
 	// DefaultPollingInterval is the default interval for job polling
 	DefaultPollingInterval = 5 * time.Second
+	// DefaultLockDuration is the default duration for Redis lock
+	DefaultLockDuration = 2 * time.Minute
 )
 
 // Worker represents a background worker
@@ -35,7 +41,10 @@ func New(ctx context.Context) *Worker {
 
 // Start begins the worker process
 func Start(ctx context.Context) {
-	fmt.Println("Initializing worker...")
+	log.Info("Initializing worker", map[string]interface{}{
+		"notification_interval_minutes": env.GetConfig().NotificationIntervalMinutes,
+		"payment_reminder_days":         env.GetConfig().PaymentReminderDays,
+	})
 
 	worker := New(ctx)
 	worker.Run()
@@ -43,9 +52,11 @@ func Start(ctx context.Context) {
 	// Wait for shutdown signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	sig := <-quit
 
-	fmt.Println("Worker shutdown signal received")
+	log.Warn("Worker shutdown signal received", map[string]interface{}{
+		"signal": sig.String(),
+	})
 	worker.Stop()
 }
 
@@ -55,25 +66,74 @@ func (w *Worker) Run() {
 	go w.processJobs()
 	go w.processScheduledTasks()
 
-	fmt.Println("Worker started successfully")
+	log.Info("Worker started successfully", nil)
+}
+
+// RunNotificationsOnce checks MongoDB and sends due payment notifications once.
+// It is intended for system cron, Replit scheduled jobs, or similar schedulers.
+func RunNotificationsOnce(ctx context.Context) error {
+	return RunNotificationsOnceWithLock(ctx, DefaultLockDuration)
+}
+
+// RunNotificationsOnceWithLock checks MongoDB and sends due payment notifications with custom lock duration
+func RunNotificationsOnceWithLock(ctx context.Context, lockDuration time.Duration) error {
+	startTime := time.Now()
+	log.Info("Starting notification scan", nil)
+
+	// Try to acquire lock
+	locked, err := appredis.AcquireLock(ctx, "payment-notifications", lockDuration)
+	if err != nil {
+		log.Error("Failed to acquire lock", err, nil)
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	if !locked {
+		log.Info("Skipping notification scan - another instance holds the lock", nil)
+		return nil
+	}
+
+	defer func() {
+		// Release lock
+		appredis.ReleaseLock(ctx, "payment-notifications")
+	}()
+
+	// Send notifications
+	err = paymentservice.New(env.GetConfig()).SendUpcomingNotifications(ctx, time.Now().UTC())
+	duration := time.Since(startTime)
+
+	if err != nil {
+		log.Error("Notification scan failed", err, map[string]interface{}{
+			"duration_ms": duration.Milliseconds(),
+		})
+		return err
+	}
+
+	log.Info("Notification scan completed", map[string]interface{}{
+		"duration_ms": duration.Milliseconds(),
+	})
+	return nil
 }
 
 // Stop gracefully stops the worker
 func (w *Worker) Stop() {
-	fmt.Println("Stopping worker...")
+	log.Info("Stopping worker...", nil)
 	w.cancel()
 	time.Sleep(2 * time.Second) // Allow time for current jobs to complete
-	fmt.Println("Worker stopped gracefully")
+	log.Info("Worker stopped gracefully", nil)
 }
 
 // processJobs handles incoming jobs from Redis queues
 func (w *Worker) processJobs() {
+	log.Info("Job processor started", map[string]interface{}{
+		"polling_interval": DefaultPollingInterval.String(),
+	})
+
 	ticker := time.NewTicker(DefaultPollingInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-w.ctx.Done():
+			log.Info("Job processor stopped", nil)
 			return
 		case <-ticker.C:
 			// Poll for jobs from Redis
@@ -84,12 +144,25 @@ func (w *Worker) processJobs() {
 
 // processScheduledTasks handles scheduled/recurring tasks
 func (w *Worker) processScheduledTasks() {
-	ticker := time.NewTicker(1 * time.Minute)
+	interval := time.Duration(env.GetConfig().NotificationIntervalMinutes) * time.Minute
+	if interval < time.Minute {
+		interval = time.Minute
+	}
+
+	log.Info("Scheduled task processor started", map[string]interface{}{
+		"interval": interval.String(),
+	})
+
+	// Run immediately on start
+	w.runScheduledTasks()
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-w.ctx.Done():
+			log.Info("Scheduled task processor stopped", nil)
 			return
 		case <-ticker.C:
 			// Run scheduled tasks
@@ -115,8 +188,8 @@ func (w *Worker) runScheduledTasks() {
 	case <-w.ctx.Done():
 		return
 	default:
-		if err := paymentservice.New(env.GetConfig()).SendUpcomingNotifications(w.ctx, time.Now()); err != nil {
-			fmt.Printf("[Worker] payment notification scan failed: %v\n", err)
+		if err := RunNotificationsOnce(w.ctx); err != nil {
+			log.Error("Payment notification scan failed", err, nil)
 		}
 	}
 }

@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"strings"
+
 	"github.com/ares/dp-vc-webApp/configs/response"
 	"github.com/ares/dp-vc-webApp/models/user"
 	authservice "github.com/ares/dp-vc-webApp/services/auth"
@@ -37,4 +39,30 @@ func (ctrl *Controller) Login(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (ctrl *Controller) Logout(c *gin.Context) {
+	// Get token from Authorization header
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		response.Unauthorized(c, "missing authorization header")
+		return
+	}
+
+	// Extract Bearer token
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		response.Unauthorized(c, "invalid authorization header format")
+		return
+	}
+	token := parts[1]
+
+	// Logout the user (blacklist the token)
+	err := ctrl.service.Logout(c.Request.Context(), token)
+	if err != nil {
+		response.Error(c, 400, err.Error())
+		return
+	}
+
+	response.Success(c, gin.H{"message": "successfully logged out"})
 }
